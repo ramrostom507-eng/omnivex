@@ -437,29 +437,56 @@ function setupActions() {
     } catch (error) { alert("تعذّر حفظ الفرصة: " + (error.message || String(error))); }
   });
 
-  $("askAI").addEventListener("click", async () => {
-    const prompt = $("aiPrompt").value.trim();
-    if (!prompt) return alert("اكتب طلب التحليل أولاً.");
-    $("askAI").disabled = true;
-    msg("aiStatus", "جارٍ الاتصال بمساعد OMNIVEX...");
-    $("aiResult").textContent = "";
+ $("askAI").addEventListener("click", async () => {
+  const prompt = $("aiPrompt").value.trim();
+
+  if (!prompt) {
+    return alert("اكتب طلب التحليل أولاً.");
+  }
+
+  $("askAI").disabled = true;
+  msg("aiStatus", "جارٍ الاتصال بمساعد OMNIVEX...");
+  $("aiResult").textContent = "";
+
+  try {
+    const { data, error } = await sb.functions.invoke("omnivex-ai", {
+      body: {
+        prompt,
+        mode: $("aiMode").value
+      }
+    });
+
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+
+    $("aiResult").textContent =
+      data?.answer || "لم تصل إجابة من المساعد.";
+
+    msg(
+      "aiStatus",
+      "اكتمل التحليل. راجع المصادر والافتراضات قبل اتخاذ قرار."
+    );
+
+  } catch (error) {
+    console.error("OMNIVEX AI:", error);
+
+    let detail = error.message || String(error);
+
     try {
-      const { data, error } = await sb.functions.invoke("omnivex-ai", {
-        body: { prompt, mode: $("aiMode").value }
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      $("aiResult").textContent = data?.answer || "لم تصل إجابة من المساعد.";
-      msg("aiStatus", "اكتمل التحليل. راجع المصادر والافتراضات قبل اتخاذ قرار.");
-    } catch (error) {
-      console.error("OMNIVEX AI:", error);
-      msg("aiStatus", "تعذّر إكمال التحليل. تحقق من نشر Edge Function باسم omnivex-ai وإعداداته.");
-      $("aiResult").textContent = error.message || String(error);
-    } finally {
-      $("askAI").disabled = false;
-    }
-  });
-}
+      if (error.context && typeof error.context.json === "function") {
+        const body = await error.context.json();
+        detail = body?.error || body?.message || detail;
+      }
+    } catch (_) {}
+
+    msg("aiStatus", "تعذّر تنفيذ الطلب. ظهرت تفاصيل الخطأ أدناه.");
+    $("aiResult").textContent = detail;
+
+  } finally {
+    $("askAI").disabled = false;
+  }
+});
+ 
 
 async function initialize() {
   if (!window.supabase?.createClient) {
