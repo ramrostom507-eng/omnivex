@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="ar" dir="rtl">
 <head>
@@ -137,15 +136,15 @@ th{color:var(--gold);font-weight:600}.empty{padding:26px;text-align:center;color
 <div class="sectionhead"><h2>لوحة إدارة OMNIVEX</h2><button class="btn secondary" id="adminRefresh">تحديث البيانات</button></div>
 <div class="admin-grid">
 <div class="card"><div class="label">الحسابات المسجلة</div><div class="admin-stat" id="adminUsers">—</div></div>
-<div class="card"><div class="label">مستخدمون نشطون خلال 24 ساعة</div><div class="admin-stat" id="adminActiveUsers">—</div></div>
-<div class="card"><div class="label">الجلسات النشطة حالياً (تقديري)</div><div class="admin-stat" id="adminSessions">—</div></div>
-<div class="card"><div class="label">مشاهدات الصفحات خلال 24 ساعة</div><div class="admin-stat" id="adminViews">—</div></div>
-<div class="card"><div class="label">أحداث النشاط خلال 24 ساعة</div><div class="admin-stat" id="adminEvents24">—</div></div>
+<div class="card"><div class="label">زوار اليوم المسجلون في سجل النشاط</div><div class="admin-stat" id="adminActiveUsers">—</div></div>
+<div class="card"><div class="label">الجلسات النشطة حالياً</div><div class="admin-stat" id="adminSessions">—</div></div>
+<div class="card"><div class="label">مشاهدات الصفحات اليوم</div><div class="admin-stat" id="adminViews">—</div></div>
+<div class="card"><div class="label">أحداث النشاط اليوم</div><div class="admin-stat" id="adminEvents24">—</div></div>
 <div class="card"><div class="label">إجمالي أحداث النشاط</div><div class="admin-stat" id="adminEventsTotal">—</div></div>
 </div>
 <div class="card"><h3>الجلسات النشطة مؤخراً</h3><div class="admin-table"><table><thead><tr><th>المستخدم</th><th>آخر صفحة</th><th>آخر نشاط</th><th>الحالة</th></tr></thead><tbody id="adminSessionRows"><tr><td colspan="4" class="empty">اضغط تحديث البيانات.</td></tr></tbody></table></div></div>
 <div class="card"><h3>سجل الدخول والخروج ومشاهدات الصفحات</h3><div class="admin-table"><table><thead><tr><th>المستخدم</th><th>الحدث</th><th>الصفحة</th><th>التوقيت</th></tr></thead><tbody id="adminActivityRows"><tr><td colspan="4" class="empty">اضغط تحديث البيانات.</td></tr></tbody></table></div></div>
-<div class="notice">الجلسة النشطة تُقدّر من وصول نبضة اتصال خلال آخر خمس دقائق. المستخدمون النشطون هنا هم الحسابات التي سجلت الدخول، وليس الزوار المجهولين.</div>
+<div class="notice">التتبع الحالي يسجل نشاط الحسابات التي سجلت الدخول فقط، ولا يحتسب الزوار المجهولين. الجلسات النشطة تعتمد على نبضات الاتصال التي تصل إلى الخادم.</div>
 </section>
 </main></div>
 
@@ -172,7 +171,7 @@ function getActivitySessionId(){
 }
 async function trackActivity(eventType,page){
  if(!sb||!currentUser)return;
- try{await sb.functions.invoke("omnivex-admin",{body:{action:"track",event_type:eventType,session_id:getActivitySessionId(),page:page||$("admin")?.id||document.querySelector(".section.active")?.id||"overview"}})}
+ try{await sb.functions.invoke("omnivex-admin",{body:{action:"track",event_type:eventType,session_id:getActivitySessionId(),page:page||document.querySelector(".section.active")?.id||"overview"}})}
  catch(e){console.warn("Activity tracking:",e)}
 }
 function startActivityTracking(){
@@ -219,54 +218,62 @@ async function loadAll(){
 async function insertRow(table,payload){const {error}=await sb.from(table).insert(payload);if(error)throw error;await loadAll()}
 function clearFields(ids){ids.forEach(id=>{if($(id))$(id).value=""})}
 
+/* إصلاح ربط لوحة الإدارة مع أسماء الحقول الفعلية التي ترجعها Edge Function */
 async function loadAdminDashboard(){
  if(!currentUser||(currentUser.email||"").toLowerCase()!==ADMIN_EMAIL)return;
  const ids=["adminUsers","adminActiveUsers","adminSessions","adminViews","adminEvents24","adminEventsTotal"];
  ids.forEach(id=>msg(id,"…"));
  try{
- const {data,error}=await sb.functions.invoke("omnivex-admin",{body:{action:"dashboard"}});
- if(error)throw error;if(data?.error)throw new Error(data.error);
- const st=data?.stats||data?.summary||data||{};
- const pick=(...keys)=>{for(const k of keys)if(st[k]!==undefined&&st[k]!==null)return st[k];return 0};
- msg("adminUsers",pick("total_users","users_total","users"));
- msg("adminActiveUsers",pick("active_users_24h","active_users","users_active_24h"));
- msg("adminSessions",pick("active_sessions","sessions_active","current_sessions"));
- msg("adminViews",pick("page_views_24h","views_24h","total_page_views_24h"));
- msg("adminEvents24",pick("events_24h","activity_24h","total_events_24h"));
- msg("adminEventsTotal",pick("total_events","events_total","activity_total"));
- const sessions=data?.sessions||data?.active_sessions_list||[];
- const events=data?.events||data?.recent_events||data?.activity||[];
- $("adminSessionRows").innerHTML=sessions.length?sessions.map(x=>`<tr><td>${esc(x.email||x.user_email||x.user_id)}</td><td>${esc(x.page)}</td><td>${date(x.last_seen||x.updated_at||x.created_at)}</td><td>${esc(x.status||"نشطة")}</td></tr>`).join(""):empty(4);
- $("adminActivityRows").innerHTML=events.length?events.map(x=>`<tr><td>${esc(x.email||x.user_email||x.user_id)}</td><td>${esc(x.event_type||x.event)}</td><td>${esc(x.page)}</td><td>${date(x.created_at||x.timestamp)}</td></tr>`).join(""):empty(4);
- }catch(e){console.error("Admin:",e);ids.forEach(id=>msg(id,"—"));$("adminSessionRows").innerHTML=`<tr><td colspan="4" class="empty">${esc(e.message||e)}</td></tr>`;$("adminActivityRows").innerHTML=empty(4)}
+  const {data,error}=await sb.functions.invoke("omnivex-admin",{body:{action:"dashboard"}});
+  if(error)throw error;
+  if(data?.error)throw new Error(data.error);
+
+  // الحقول الفعلية في استجابة الدالة:
+  msg("adminUsers",data?.registered_users??0);
+  msg("adminActiveUsers",data?.visitors_today??0);
+  msg("adminSessions",data?.currently_active_sessions??0);
+  msg("adminViews",data?.page_views_today??0);
+  msg("adminEvents24",data?.events_today??0);
+  msg("adminEventsTotal",data?.total_events??0);
+
+  const sessions=Array.isArray(data?.online)?data.online:[];
+  const events=Array.isArray(data?.recent)?data.recent:[];
+  $("adminSessionRows").innerHTML=sessions.length?sessions.map(x=>`<tr><td>${esc(x.user_email||"غير معروف")}</td><td>${esc(x.page||"—")}</td><td>${date(x.created_at||x.last_seen)}</td><td>نشطة</td></tr>`).join(""):empty(4);
+  $("adminActivityRows").innerHTML=events.length?events.map(x=>`<tr><td>${esc(x.user_email||"غير معروف")}</td><td>${esc(x.event_type||"—")}</td><td>${esc(x.page||"—")}</td><td>${date(x.created_at)}</td></tr>`).join(""):empty(4);
+ }catch(e){
+  console.error("Admin dashboard:",e);
+  ids.forEach(id=>msg(id,"—"));
+  $("adminSessionRows").innerHTML=`<tr><td colspan="4" class="empty">${esc(e.message||e)}</td></tr>`;
+  $("adminActivityRows").innerHTML=empty(4);
+ }
 }
 
 function setupActions(){
  $("loginBtn").addEventListener("click",async()=>{
- const email=$("email").value.trim(),password=$("password").value;
- if(!email||!password)return msg("authMsg","أدخل البريد وكلمة المرور.");
- $("loginBtn").disabled=true;msg("authMsg","جارٍ تسجيل الدخول...");
- try{const {data,error}=await sb.auth.signInWithPassword({email,password});if(error)throw error;if(data.user)showApp(data.user)}
- catch(e){msg("authMsg","تعذّر تسجيل الدخول: "+e.message)}
- finally{$("loginBtn").disabled=false}
+  const email=$("email").value.trim(),password=$("password").value;
+  if(!email||!password)return msg("authMsg","أدخل البريد وكلمة المرور.");
+  $("loginBtn").disabled=true;msg("authMsg","جارٍ تسجيل الدخول...");
+  try{const {data,error}=await sb.auth.signInWithPassword({email,password});if(error)throw error;if(data.user)showApp(data.user)}
+  catch(e){msg("authMsg","تعذّر تسجيل الدخول: "+e.message)}
+  finally{$("loginBtn").disabled=false}
  });
  $("signupBtn").addEventListener("click",async()=>{
- const email=$("email").value.trim(),password=$("password").value;
- if(!email||!password)return msg("authMsg","أدخل البريد وكلمة المرور.");
- if(password.length<6)return msg("authMsg","كلمة المرور يجب أن تكون 6 أحرف على الأقل.");
- $("signupBtn").disabled=true;msg("authMsg","جارٍ إنشاء الحساب...");
- try{const {data,error}=await sb.auth.signUp({email,password});if(error)throw error;if(data.session&&data.user)showApp(data.user);else msg("authMsg","تم إرسال طلب التسجيل. تحقق من بريدك الإلكتروني إذا كان تأكيد البريد مفعّلاً.")}
- catch(e){msg("authMsg","تعذّر إنشاء الحساب: "+e.message)}
- finally{$("signupBtn").disabled=false}
+  const email=$("email").value.trim(),password=$("password").value;
+  if(!email||!password)return msg("authMsg","أدخل البريد وكلمة المرور.");
+  if(password.length<6)return msg("authMsg","كلمة المرور يجب أن تكون 6 أحرف على الأقل.");
+  $("signupBtn").disabled=true;msg("authMsg","جارٍ إنشاء الحساب...");
+  try{const {data,error}=await sb.auth.signUp({email,password});if(error)throw error;if(data.session&&data.user)showApp(data.user);else msg("authMsg","تم إرسال طلب التسجيل. تحقق من بريدك الإلكتروني إذا كان تأكيد البريد مفعّلاً.")}
+  catch(e){msg("authMsg","تعذّر إنشاء الحساب: "+e.message)}
+  finally{$("signupBtn").disabled=false}
  });
  $("logoutBtn").addEventListener("click",async()=>{
- await trackActivity("session_end");stopActivityTracking();
- try{const {error}=await sb.auth.signOut();if(error)throw error;currentUser=null;showAuth("تم تسجيل الخروج.")}
- catch(e){alert("تعذّر تسجيل الخروج: "+e.message)}
+  await trackActivity("session_end");stopActivityTracking();
+  try{const {error}=await sb.auth.signOut();if(error)throw error;currentUser=null;showAuth("تم تسجيل الخروج.")}
+  catch(e){alert("تعذّر تسجيل الخروج: "+e.message)}
  });
  sb.auth.onAuthStateChange((_event,session)=>{
- if(session?.user&&!isShowingApp)showApp(session.user);
- if(!session&&isShowingApp){currentUser=null;showAuth("انتهت الجلسة. سجّل الدخول مجدداً.")}
+  if(session?.user&&!isShowingApp)showApp(session.user);
+  if(!session&&isShowingApp){currentUser=null;showAuth("انتهت الجلسة. سجّل الدخول مجدداً.")}
  });
  document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>navigate(b.dataset.page)));
  document.querySelectorAll("[data-goto]").forEach(b=>b.addEventListener("click",()=>navigate(b.dataset.goto)));
@@ -275,57 +282,57 @@ function setupActions(){
  $("cancelCompany").addEventListener("click",()=>$("companyForm").classList.add("hidden"));
 
  $("saveCompany").addEventListener("click",async()=>{
- try{const name=$("coName").value.trim();if(!name)return alert("اكتب اسم الشركة.");
- await insertRow("companies",{name,country:$("coCountry").value||null,industry:$("coIndustry").value||null,website:$("coWebsite").value||null,contact_name:$("coContact").value||null,contact_email:$("coEmail").value||null,notes:$("coNotes").value||null});
- $("companyForm").classList.add("hidden");clearFields(["coName","coCountry","coIndustry","coWebsite","coContact","coEmail","coNotes"]);alert("تم حفظ الشركة.")
- }catch(e){alert("تعذّر حفظ الشركة: "+e.message)}
+  try{const name=$("coName").value.trim();if(!name)return alert("اكتب اسم الشركة.");
+   await insertRow("companies",{name,country:$("coCountry").value||null,industry:$("coIndustry").value||null,website:$("coWebsite").value||null,contact_name:$("coContact").value||null,contact_email:$("coEmail").value||null,notes:$("coNotes").value||null});
+   $("companyForm").classList.add("hidden");clearFields(["coName","coCountry","coIndustry","coWebsite","coContact","coEmail","coNotes"]);alert("تم حفظ الشركة.")
+  }catch(e){alert("تعذّر حفظ الشركة: "+e.message)}
  });
  $("saveResearch").addEventListener("click",async()=>{
- try{const title=$("rTitle").value.trim();if(!title)return alert("اكتب عنوان الدراسة.");
- await insertRow("market_research",{title,country:$("rCountry").value||null,target_market:$("rCountry").value||null,industry:$("rIndustry").value||null,research_type:$("rType").value,summary:$("rSummary").value||null,findings:{note:"تم إدخالها يدوياً"},sources:[],confidence:"unverified",status:"draft"});
- clearFields(["rTitle","rCountry","rIndustry","rSummary"]);alert("تم حفظ الدراسة.")
- }catch(e){alert("تعذّر حفظ الدراسة: "+e.message)}
+  try{const title=$("rTitle").value.trim();if(!title)return alert("اكتب عنوان الدراسة.");
+   await insertRow("market_research",{title,country:$("rCountry").value||null,target_market:$("rCountry").value||null,industry:$("rIndustry").value||null,research_type:$("rType").value,summary:$("rSummary").value||null,findings:{note:"تم إدخالها يدوياً"},sources:[],confidence:"unverified",status:"draft"});
+   clearFields(["rTitle","rCountry","rIndustry","rSummary"]);alert("تم حفظ الدراسة.")
+  }catch(e){alert("تعذّر حفظ الدراسة: "+e.message)}
  });
  $("savePain").addEventListener("click",async()=>{
- try{const title=$("pTitle").value.trim();if(!title)return alert("اكتب عنوان المشكلة.");
- await insertRow("pain_points",{title,country:$("pCountry").value||null,industry:$("pIndustry").value||null,severity:$("pSeverity").value,description:$("pDescription").value||null,evidence:$("pDescription").value||null,source_url:$("pSource").value||null});
- clearFields(["pTitle","pCountry","pIndustry","pDescription","pSource"]);alert("تم حفظ المشكلة.")
- }catch(e){alert("تعذّر حفظ المشكلة: "+e.message)}
+  try{const title=$("pTitle").value.trim();if(!title)return alert("اكتب عنوان المشكلة.");
+   await insertRow("pain_points",{title,country:$("pCountry").value||null,industry:$("pIndustry").value||null,severity:$("pSeverity").value,description:$("pDescription").value||null,evidence:$("pDescription").value||null,source_url:$("pSource").value||null});
+   clearFields(["pTitle","pCountry","pIndustry","pDescription","pSource"]);alert("تم حفظ المشكلة.")
+  }catch(e){alert("تعذّر حفظ المشكلة: "+e.message)}
  });
  $("saveSolution").addEventListener("click",async()=>{
- try{const name=$("sName").value.trim();if(!name)return alert("اكتب اسم الحل.");
- await insertRow("solutions",{name,solution_type:$("sType").value||null,estimated_cost:$("sCost").value?Number($("sCost").value):null,proposed_price:$("sPrice").value?Number($("sPrice").value):null,description:$("sDescription").value||null,deliverables:[],currency:"USD"});
- clearFields(["sName","sType","sCost","sPrice","sDescription"]);alert("تم حفظ الحل.")
- }catch(e){alert("تعذّر حفظ الحل: "+e.message)}
+  try{const name=$("sName").value.trim();if(!name)return alert("اكتب اسم الحل.");
+   await insertRow("solutions",{name,solution_type:$("sType").value||null,estimated_cost:$("sCost").value?Number($("sCost").value):null,proposed_price:$("sPrice").value?Number($("sPrice").value):null,description:$("sDescription").value||null,deliverables:[],currency:"USD"});
+   clearFields(["sName","sType","sCost","sPrice","sDescription"]);alert("تم حفظ الحل.")
+  }catch(e){alert("تعذّر حفظ الحل: "+e.message)}
  });
  $("saveDeal").addEventListener("click",async()=>{
- try{const title=$("dTitle").value.trim();if(!title)return alert("اكتب عنوان الفرصة.");
- await insertRow("deals",{title,amount:Number($("dAmount").value||0),stage:$("dStage").value,expected_close:$("dDate").value||null,notes:$("dNotes").value||null,currency:"USD"});
- clearFields(["dTitle","dDate","dNotes"]);$("dAmount").value="0";alert("تم حفظ الفرصة.")
- }catch(e){alert("تعذّر حفظ الفرصة: "+e.message)}
+  try{const title=$("dTitle").value.trim();if(!title)return alert("اكتب عنوان الفرصة.");
+   await insertRow("deals",{title,amount:Number($("dAmount").value||0),stage:$("dStage").value,expected_close:$("dDate").value||null,notes:$("dNotes").value||null,currency:"USD"});
+   clearFields(["dTitle","dDate","dNotes"]);$("dAmount").value="0";alert("تم حفظ الفرصة.")
+  }catch(e){alert("تعذّر حفظ الفرصة: "+e.message)}
  });
  $("askAI").addEventListener("click",async()=>{
- const prompt=$("aiPrompt").value.trim();if(!prompt)return alert("اكتب طلب التحليل أولاً.");
- $("askAI").disabled=true;msg("aiStatus","جارٍ الاتصال بمساعد OMNIVEX...");$("aiResult").textContent="";
- try{
- const {data,error}=await sb.functions.invoke("omnivex-ai",{body:{prompt,mode:$("aiMode").value}});
- if(error)throw error;if(data?.error)throw new Error(data.error);
- $("aiResult").textContent=data?.answer||"لم تصل إجابة من المساعد.";msg("aiStatus","اكتمل التحليل. راجع المصادر والافتراضات قبل اتخاذ قرار.")
- }catch(e){
- console.error(e);let detail=e.message||String(e);
- try{if(e.context&&typeof e.context.json==="function"){const b=await e.context.json();detail=b?.error||b?.message||detail}}catch(_){}
- msg("aiStatus","تعذّر تنفيذ الطلب. تفاصيل الخطأ:");$("aiResult").textContent=detail
- }finally{$("askAI").disabled=false}
+  const prompt=$("aiPrompt").value.trim();if(!prompt)return alert("اكتب طلب التحليل أولاً.");
+  $("askAI").disabled=true;msg("aiStatus","جارٍ الاتصال بمساعد OMNIVEX...");$("aiResult").textContent="";
+  try{
+   const {data,error}=await sb.functions.invoke("omnivex-ai",{body:{prompt,mode:$("aiMode").value}});
+   if(error)throw error;if(data?.error)throw new Error(data.error);
+   $("aiResult").textContent=data?.answer||"لم تصل إجابة من المساعد.";msg("aiStatus","اكتمل التحليل. راجع المصادر والافتراضات قبل اتخاذ قرار.")
+  }catch(e){
+   console.error(e);let detail=e.message||String(e);
+   try{if(e.context&&typeof e.context.json==="function"){const b=await e.context.json();detail=b?.error||b?.message||detail}}catch(_){}
+   msg("aiStatus","تعذّر تنفيذ الطلب. تفاصيل الخطأ:");$("aiResult").textContent=detail
+  }finally{$("askAI").disabled=false}
  });
 }
 
 async function initialize(){
  if(!window.supabase?.createClient){showAuth("تعذّر تحميل مكتبة Supabase. تحقق من الإنترنت وأعد تحميل الصفحة.");return}
  try{
- sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);setupActions();
- msg("authMsg","تم تحميل إعدادات الاتصال. يمكنك تسجيل الدخول.");
- const {data,error}=await sb.auth.getSession();if(error)throw error;
- if(data.session?.user)showApp(data.session.user);else showAuth("الاتصال جاهز. سجّل الدخول أو أنشئ حساباً.");
+  sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);setupActions();
+  msg("authMsg","تم تحميل إعدادات الاتصال. يمكنك تسجيل الدخول.");
+  const {data,error}=await sb.auth.getSession();if(error)throw error;
+  if(data.session?.user)showApp(data.session.user);else showAuth("الاتصال جاهز. سجّل الدخول أو أنشئ حساباً.");
  }catch(e){console.error(e);showAuth("تعذّر تهيئة الاتصال: "+e.message)}
 }
 initialize();
