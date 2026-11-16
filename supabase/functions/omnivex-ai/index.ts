@@ -67,7 +67,7 @@ Deno.serve(async (req: Request) => {
         console.error("Groq returned no text");
       } else {
         console.error("Groq request failed", { status: response.status, message: String(result?.error?.message ?? "").slice(0, 400) });
-        if (!geminiKey || (response.status !== 429 && response.status < 500)) {
+        if (!geminiKey) {
           return json(502, {
             error: "تعذّر إكمال التحليل عبر Groq.", provider: "Groq",
             provider_status: response.status,
@@ -76,7 +76,7 @@ Deno.serve(async (req: Request) => {
         }
       }
     }
-    if (!geminiKey) return json(503, { error: "أضف سر GROQ_API_KEY في Supabase لتشغيل المساعد. لا ترسل المفتاح داخل المحادثة." });
+    if (!geminiKey) return json(503, { error: "لا يوجد مفتاح مزود ذكاء اصطناعي مضبوط. أضف GEMINI_API_KEY أو GROQ_API_KEY في أسرار Supabase. لا ترسل المفتاح داخل المحادثة." });
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 55000);
     let response: Response;
@@ -88,7 +88,6 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          tools: [{ google_search: {} }],
           generationConfig: { maxOutputTokens: 1800 },
         }),
       });
