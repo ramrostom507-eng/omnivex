@@ -228,13 +228,14 @@ async function loadAdminDashboard(){
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
 
-  // الحقول الفعلية في استجابة الدالة:
-  msg("adminUsers",data?.registered_users??0);
-  msg("adminActiveUsers",data?.visitors_today??0);
-  msg("adminSessions",data?.currently_active_sessions??0);
-  msg("adminViews",data?.page_views_today??0);
-  msg("adminEvents24",data?.events_today??0);
-  msg("adminEventsTotal",data?.total_events??0);
+  // Edge Function ترجع الإحصائيات داخل data.stats؛ ندعم الشكلين للتوافق.
+  const stats=data?.stats??data??{};
+  msg("adminUsers",stats.registered_users??0);
+  msg("adminActiveUsers",stats.visitors_today??0);
+  msg("adminSessions",stats.currently_active_sessions??0);
+  msg("adminViews",stats.page_views_today??0);
+  msg("adminEvents24",stats.events_today??0);
+  msg("adminEventsTotal",stats.total_events??0);
 
   const sessions=Array.isArray(data?.online)?data.online:[];
   const events=Array.isArray(data?.recent)?data.recent:[];
