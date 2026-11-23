@@ -321,7 +321,7 @@ function setupActions(){
    if(error)throw error;if(data?.error)throw new Error(data.error);
    const answer=data?.answer||"لم تصل إجابة من المساعد.";
    const citations=Array.isArray(data?.citations)?data.citations:[];
-   const sourceText=citations.length?"\\n\\nالمراجع المستلمة من مزود البحث:\\n"+citations.map((x,i)=>(i+1)+". "+(x.title||x.url)+" — "+x.url).join("\\n"):"";
+   const sourceText=citations.length?"\n\nالمراجع المستلمة من مزود البحث:\n"+citations.map((x,i)=>(i+1)+". "+(x.title||x.url)+" — "+x.url).join("\n"):"";
    $("aiResult").textContent=answer+sourceText;
    msg("aiStatus",data?.web_search_used?"اكتمل التحليل مع بحث ويب ومراجع. تحقق من تاريخ كل مصدر قبل اتخاذ القرار.":(data?.notice||"اكتمل التحليل دون بحث ويب حي."))
   }catch(e){
