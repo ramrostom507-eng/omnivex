@@ -16,7 +16,7 @@ const MAX_PROMPT_LENGTH = 12000;
 
 function needsLiveSearch(prompt: string, mode: string): boolean {
   const p = (prompt + " " + mode).toLowerCase();
-  return /بحث|ابحث|مصادر|مراجع|آخر|احدث|حديث|حالي|اليوم|هذا الأسبوع|هذا الشهر|سعر اليوم|أسعار|السوق الآن|بيانات التجارة|إحصائيات|market[_\\s]research|competitor[_\\s]analysis|opportunity[_\\s]scan|latest|current|today|this week|this month|recent|live|sources|citations|trade data|market size|competitor|competitors|import|export|hs code/.test(p);
+  return /بحث|ابحث|مصادر|مراجع|آخر|أحدث|حديث|حالي|اليوم|هذا الأسبوع|هذا الشهر|سعر اليوم|أسعار|السوق الآن|بيانات التجارة|إحصائيات|استيراد|تصدير|موردين|موردون|مستوردين|منافسين|شركات في|فرص السوق|تحليل السوق|دراسة سوق|حجم السوق|market\\s*research|competitor\\s*analysis|opportunity\\s*scan|latest|current|today|this week|this month|recent|live|sources|citations|trade data|market size|competitor|competitors|import|export|hs code/.test(p);
 }
 
 function collectInteraction(interaction: any) {
@@ -248,11 +248,8 @@ Deno.serve(async (req: Request) => {
                 citations.push({ title: cleanUrl, url: cleanUrl });
               }
             }
-            const searched = useGroqSearch && (
-              Array.isArray(message?.tool_calls) ||
-              citations.length > 0 ||
-              /\\[\\d+\\]/.test(answer)
-            );
+            // tool_choice="required" forces the built-in browser_search path.
+            const searched = useGroqSearch;
             return json(200, {
               answer: answer.trim(), model: result?.model || "openai/gpt-oss-120b",
               provider: "Groq", web_search_used: searched, citations,
