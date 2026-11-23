@@ -319,7 +319,11 @@ function setupActions(){
   try{
    const {data,error}=await sb.functions.invoke("omnivex-ai",{body:{prompt,mode:$("aiMode").value}});
    if(error)throw error;if(data?.error)throw new Error(data.error);
-   $("aiResult").textContent=data?.answer||"لم تصل إجابة من المساعد.";msg("aiStatus","اكتمل التحليل. راجع المصادر والافتراضات قبل اتخاذ قرار.")
+   const answer=data?.answer||"لم تصل إجابة من المساعد.";
+   const citations=Array.isArray(data?.citations)?data.citations:[];
+   const sourceText=citations.length?"\\n\\nالمراجع المستلمة من مزود البحث:\\n"+citations.map((x,i)=>(i+1)+". "+(x.title||x.url)+" — "+x.url).join("\\n"):"";
+   $("aiResult").textContent=answer+sourceText;
+   msg("aiStatus",data?.web_search_used?"اكتمل التحليل مع بحث ويب ومراجع. تحقق من تاريخ كل مصدر قبل اتخاذ القرار.":(data?.notice||"اكتمل التحليل دون بحث ويب حي."))
   }catch(e){
    console.error(e);let detail=e.message||String(e);
    try{if(e.context&&typeof e.context.json==="function"){const b=await e.context.json();detail=b?.error||b?.message||detail}}catch(_){}
