@@ -1,50 +1,191 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.0";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
+  status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+});
+const SEARCH_MODEL_DEFAULT = "gemini-3.5-flash-lite";
+const STANDARD_MODEL_DEFAULT = "gemini-3.8-flash";
+const MAX_PROMPT_LENGTH = 12000;
+
+function needsLiveSearch(prompt: string, mode: string): boolean {
+  const p = (prompt + " " + mode).toLowerCase();
+  return /بحث|ابحث|مصادر|مراجع|آخر|احدث|حديث|حالي|اليوم|هذا الأسبوع|هذا الشهر|سعر اليوم|أسعار|السوق الآن|بيانات التجارة|إحصائيات|market research|latest|current|today|this week|this month|recent|live|sources|citations|trade data|market size|competitor|competitors|import|export|hs code/.test(p);
+}
+
+function collectInteraction(interaction: any) {
+  const steps = Array.isArray(interaction?.steps) ? interaction.steps : [];
+  const textParts: string[] = [];
+  const citations: Array<{ title: string; url: string }> = [];
+  for (const step of steps) {
+    if (step?.type !== "model_output" || !Array.isArray(step.content)) continue;
+    for (const block of step.content) {
+      if (block?.type !== "text" || typeof block.text !== "string") continue;
+      textParts.push(block.text);
+      for (const annotation of Array.isArray(block.annotations) ? block.annotations : []) {
+        if (annotation?.type !== "url_citation") continue;
+        const url = typeof annotation.url === "string" ? annotation.url : "";
+        if (!/^https?:\/\//i.test(url)) continue;
+        citations.push({ title: String(annotation.title || url).slice(0, 180), url });
+      }
+    }
+  }
+  const answer = (typeof interaction?.output_text === "string" && interaction.output_text.trim())
+    ? interaction.output_text.trim()
+    : textParts.join("\n").trim();
+  const unique = citations.filter((item, index, all) => all.findIndex((x) => x.url === item.url) === index);
+  return { answer, citations: unique };
+}
+
+async function callGeminiSearch(apiKey: string, model: string, system: string, prompt: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 50000);
+  try {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        input: system + "\n\nطلب المستخدم:\n" + prompt,
+        tools: [{ type: "google_search" }],
+      }),
+    });
+    const raw = await response.text();
+    let data: any = {};
+    try { data = JSON.parse(raw); } catch { /* provider returned non-JSON */ }
+    if (!response.ok) {
+      const message = String(data?.error?.message || ("HTTP " + response.status)).slice(0, 400);
+      const error = new Error(message) as Error & { status?: number };
+      error.status = response.status;
+      throw error;
+    }
+    const interaction = data?.interaction ?? data;
+    const result = collectInteraction(interaction);
+    if (!result.answer) throw new Error("لم يرجع بحث Google إجابة نصية قابلة للعرض.");
+    return { ...result, model: interaction?.model || model };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callGeminiStandard(apiKey: string, model: string, system: string, prompt: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 50000);
+  try {
+    const response = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent",
+      {
+        method: "POST",
+        headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 1800, temperature: 0.35 },
+        }),
+      },
+    );
+    const raw = await response.text();
+    let data: any = {};
+    try { data = JSON.parse(raw); } catch { /* provider returned non-JSON */ }
+    if (!response.ok) {
+      const message = String(data?.error?.message || ("HTTP " + response.status)).slice(0, 400);
+      const error = new Error(message) as Error & { status?: number };
+      error.status = response.status;
+      throw error;
+    }
+    const candidate = data?.candidates?.[0];
+    const answer = (candidate?.content?.parts ?? [])
+      .filter((part: any) => typeof part?.text === "string")
+      .map((part: any) => part.text).join("\n").trim();
+    if (!answer) throw new Error("لم يُرجع Gemini إجابة نصية.");
+    return { answer, model: data?.modelVersion || model };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
-    status, headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-  const groqKey = Deno.env.get("GROQ_API_KEY") ?? "";
   const geminiKey = Deno.env.get("GEMINI_API_KEY") ?? "";
+  const groqKey = Deno.env.get("GROQ_API_KEY") ?? "";
   const authHeader = req.headers.get("Authorization") ?? "";
   if (!authHeader.startsWith("Bearer ")) return json(401, { error: "Authentication required" });
   if (!supabaseUrl || !anonKey) return json(500, { error: "Supabase environment is not configured" });
-  const supabase = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: authHeader } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) return json(401, { error: "Invalid or expired session" });
+
   try {
+    const supabase = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const user = authData?.user;
+    if (authError || !user) return json(401, { error: "انتهت جلسة الدخول. سجّل الدخول مجدداً." });
+
     const payload = await req.json();
     const prompt = typeof payload?.prompt === "string" ? payload.prompt.trim() : "";
-    const mode = typeof payload?.mode === "string" ? payload.mode : "business_analysis";
-    if (!prompt || prompt.length > 12000) return json(400, { error: "اكتب طلباً بين حرف واحد و12000 حرف." });
+    const mode = typeof payload?.mode === "string" ? payload.mode.slice(0, 80) : "business_analysis";
+    if (!prompt || prompt.length > MAX_PROMPT_LENGTH) {
+      return json(400, { error: "اكتب طلباً بين حرف واحد و12000 حرف." });
+    }
+    if (!geminiKey && !groqKey) {
+      return json(503, { error: "لا يوجد مفتاح مزود ذكاء اصطناعي مضبوط. أضف GEMINI_API_KEY أو GROQ_API_KEY إلى أسرار Supabase." });
+    }
+
     const today = new Date().toISOString().slice(0, 10);
-    const system = `أنت OMNIVEX AI، مساعد ذكاء أعمال عالمي متخصص في أبحاث الأسواق والتجارة والاستراتيجية والنمو.
-أجب بالعربية الواضحة ما لم يطلب المستخدم لغة أخرى. التاريخ الحالي: ${today}. نوع المهمة: ${mode}.
-ميّز بين الحقائق المنشورة والتقديرات والتحليل والافتراضات والمعلومات غير المتاحة. لا تختلق شركات أو جهات اتصال أو أسعاراً أو أرقاماً أو مصادر أو تواريخ.
-إذا لم تكن أداة البحث الحي متاحة في هذه الإجابة، صرّح بذلك بوضوح ولا تدّعِ أنك بحثت على الإنترنت أو أن المعلومات آنية. لا تضع روابط أو مراجع غير متحقق منها.
-عند تقدير سوق أو إيراد أو تكلفة، اذكر المعادلة والافتراضات. لا تدّعِ أنك تواصلت مع شركة أو أرسلت رسالة أو أجريت معاملة.
-في بيانات التجارة: حدّد المنتج بدقة ولا تخلط زيت الزيتون بزيت تفل الزيتون أو زيتون المائدة. اذكر رمز HS ووصف المنتج والفترة والوحدة والعملة وحالة البيانات عند توفرها. ميّز السنة التقويمية عن التسويقية. فضّل المصادر الأولية كالجمارك والوزارات والجهات الإحصائية والمنظمات الدولية. عند غياب البيانات اكتب «غير متاح أو لم أتمكن من التحقق» بدلاً من التخمين. قدّم خلاصة منظمة تتضمن الأدلة والمصادر والتحليل والفرص والمخاطر والخطوات التالية عند ملاءمتها.`;
+    const system = "أنت OMNIVEX AI، مساعد ذكاء أعمال عالمي متخصص في أبحاث الأسواق والتجارة والاستراتيجية والنمو.\n" +
+      "أجب بالعربية الواضحة ما لم يطلب المستخدم لغة أخرى. التاريخ الحالي: " + today + ". نوع المهمة: " + mode + ".\n" +
+      "ميّز بين الحقائق المنشورة والتقديرات والتحليل والافتراضات والمعلومات غير المتاحة. لا تختلق شركات أو جهات اتصال أو أسعاراً أو أرقاماً أو مصادر أو تواريخ.\n" +
+      "إذا لم تُجرَ عملية بحث ويب فعلية فلا تدّعِ أنك بحثت على الإنترنت أو أن المعلومات آنية. لا تضع روابط أو مراجع غير متحقق منها.\n" +
+      "عند تقدير سوق أو إيراد أو تكلفة، اذكر المعادلة والافتراضات. لا تدّعِ أنك تواصلت مع شركة أو أرسلت رسالة أو أجريت معاملة.\n" +
+      "في بيانات التجارة حدّد المنتج بدقة، واذكر رمز HS والفترة والوحدة والعملة عند توفرها. فضّل المصادر الأولية كالجمارك والوزارات والجهات الإحصائية والمنظمات الدولية. عند غياب البيانات اكتب «غير متاح أو لم أتمكن من التحقق» بدلاً من التخمين.\n" +
+      "قدّم خلاصة منظمة تتضمن الأدلة والافتراضات والتحليل والفرص والمخاطر والخطوات التالية عند ملاءمتها.";
+
+    const searchRequested = needsLiveSearch(prompt, mode);
+    const searchEnabled = Deno.env.get("OMNIVEX_GOOGLE_SEARCH_ENABLED") === "true";
+    const searchModel = Deno.env.get("GEMINI_SEARCH_MODEL") || SEARCH_MODEL_DEFAULT;
+    const standardModel = Deno.env.get("GEMINI_MODEL") || STANDARD_MODEL_DEFAULT;
+
+    // Search grounding is deliberately OFF unless an administrator explicitly enables it.
+    // This prevents unexpected Google Search usage or charges during setup.
+    if (searchRequested && searchEnabled && geminiKey) {
+      const result = await callGeminiSearch(geminiKey, searchModel, system, prompt);
+      const citations = result.citations;
+      let answer = result.answer;
+      const missing = citations.filter((item) => !answer.includes(item.url));
+      if (missing.length) {
+        answer += "\n\n### مصادر البحث\n" + missing.map((item) =>
+          "- [" + item.title.replace(/[\[\]]/g, "") + "](" + item.url + ")"
+        ).join("\n");
+      }
+      return json(200, {
+        answer, model: result.model, provider: "Gemini",
+        web_search_used: citations.length > 0,
+        citations,
+        notice: citations.length
+          ? "تم استخدام بحث Google وإرفاق المراجع التي أعادتها الخدمة."
+          : "تم إرسال الطلب إلى أداة البحث، لكن لم تُرجع الخدمة مراجع قابلة للعرض.",
+      });
+    }
+
     if (groqKey) {
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 55000);
-      let response: Response;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 50000);
       try {
-        response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
-          headers: { "Authorization": `Bearer ${groqKey}`, "Content-Type": "application/json" },
-          signal: ctl.signal,
+          headers: { "Authorization": "Bearer " + groqKey, "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             model: "openai/gpt-oss-120b",
             messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
@@ -52,67 +193,47 @@ Deno.serve(async (req: Request) => {
             reasoning_effort: "medium",
           }),
         });
-      } finally { clearTimeout(timer); }
-      const raw = await response.text();
-      let result: any;
-      try { result = JSON.parse(raw); } catch { result = {}; }
-      if (response.ok) {
-        const answer = result?.choices?.[0]?.message?.content;
-        if (typeof answer === "string" && answer.trim()) {
-          return json(200, {
-            answer: answer.trim(), model: result?.model ?? "openai/gpt-oss-120b",
-            provider: "Groq", web_search_used: false, citations: [],
-          });
+        const raw = await response.text();
+        let result: any = {};
+        try { result = JSON.parse(raw); } catch { /* provider returned non-JSON */ }
+        if (response.ok) {
+          const answer = result?.choices?.[0]?.message?.content;
+          if (typeof answer === "string" && answer.trim()) {
+            return json(200, {
+              answer: answer.trim(), model: result?.model || "openai/gpt-oss-120b",
+              provider: "Groq", web_search_used: false, citations: [],
+              notice: searchRequested
+                ? "لم يُفعّل البحث الحي بعد؛ هذه إجابة نموذج ذكاء اصطناعي دون تحقق ويب آني."
+                : "هذه إجابة ذكاء اصطناعي دون بحث ويب حي.",
+            });
+          }
         }
-        console.error("Groq returned no text");
-      } else {
-        console.error("Groq request failed", { status: response.status, message: String(result?.error?.message ?? "").slice(0, 400) });
-        if (!geminiKey) {
-          return json(502, {
-            error: "تعذّر إكمال التحليل عبر Groq.", provider: "Groq",
-            provider_status: response.status,
-            provider_message: String(result?.error?.message ?? "Groq provider request failed").slice(0, 500),
-          });
-        }
+        console.error("Groq request failed", { status: response.status, message: String(result?.error?.message || "").slice(0, 300) });
+      } finally {
+        clearTimeout(timer);
       }
     }
-    if (!geminiKey) return json(503, { error: "لا يوجد مفتاح مزود ذكاء اصطناعي مضبوط. أضف GEMINI_API_KEY أو GROQ_API_KEY في أسرار Supabase. لا ترسل المفتاح داخل المحادثة." });
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 55000);
-    let response: Response;
-    try {
-      response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {
-        method: "POST",
-        headers: { "x-goog-api-key": geminiKey, "Content-Type": "application/json" },
-        signal: ctl.signal,
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 1800 },
-        }),
-      });
-    } finally { clearTimeout(timer); }
-    const raw = await response.text();
-    let result: any;
-    try { result = JSON.parse(raw); } catch { result = {}; }
-    if (!response.ok) {
-      const msg = result?.error?.message ?? "Gemini provider request failed";
-      console.error("Gemini request failed", { status: response.status, message: String(msg).slice(0, 400) });
-      return json(502, { error: "تعذّر إكمال التحليل عبر Google Gemini.", provider: "Gemini", provider_status: response.status, provider_message: String(msg).slice(0, 600) });
-    }
-    const candidate = result?.candidates?.[0];
-    const answer = (candidate?.content?.parts ?? []).filter((p: any) => typeof p?.text === "string").map((p: any) => p.text).join("\n").trim();
-    if (!answer) return json(502, { error: "لم يُرجع Gemini إجابة نصية." });
-    const citations = (candidate?.groundingMetadata?.groundingChunks ?? [])
-      .map((c: any) => c?.web).filter((w: any) => typeof w?.uri === "string")
-      .map((w: any) => ({ title: w.title || w.uri, url: w.uri }))
-      .filter((v: any, i: number, a: any[]) => a.findIndex((x: any) => x.url === v.url) === i);
-    let output = answer;
-    const missing = citations.filter((v: any) => !output.includes(v.url));
-    if (missing.length) output += "\n\n### مصادر بحث Google\n" + missing.map((v: any) => `- [${String(v.title).replace(/[\[\]]/g, "")}](${v.url})`).join("\n");
-    return json(200, { answer: output, model: result?.modelVersion ?? "gemini-3.8-flash", provider: "Gemini", web_search_used: citations.length > 0, citations });
+
+    if (!geminiKey) return json(502, { error: "تعذّر الوصول إلى مزود الذكاء الاصطناعي." });
+    const result = await callGeminiStandard(geminiKey, standardModel, system, prompt);
+    return json(200, {
+      answer: result.answer, model: result.model, provider: "Gemini",
+      web_search_used: false, citations: [],
+      notice: searchRequested
+        ? "البحث الحي غير مفعّل حالياً؛ هذه إجابة دون تحقق ويب آني."
+        : "لم يُستخدم البحث الحي في هذا الطلب.",
+    });
   } catch (error) {
+    const status = (error as any)?.status;
+    if (status === 429) return json(429, {
+      error: "بلغ مزود الذكاء الاصطناعي حد الطلبات المتاح حالياً. انتظر ثم أعد المحاولة.",
+      code: "PROVIDER_RATE_LIMIT",
+    });
     console.error("OMNIVEX AI request error", error instanceof Error ? error.message : "Unknown error");
-    return json(500, { error: error instanceof Error && error.name === "AbortError" ? "انتهت مهلة الاتصال بمزود الذكاء الاصطناعي. حاول مجدداً." : "حدث خطأ داخلي أثناء تنفيذ التحليل. يرجى المحاولة مرة أخرى." });
+    return json(error instanceof Error && error.name === "AbortError" ? 504 : 502, {
+      error: error instanceof Error && error.name === "AbortError"
+        ? "انتهت مهلة الاتصال بمزود الذكاء الاصطناعي. حاول مجدداً."
+        : "تعذّر تنفيذ التحليل عبر مزود الذكاء الاصطناعي. تحقق من إعدادات المزود ثم أعد المحاولة.",
+    });
   }
 });
