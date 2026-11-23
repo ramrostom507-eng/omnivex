@@ -241,11 +241,12 @@ Deno.serve(async (req: Request) => {
           const answer = message?.content;
           if (typeof answer === "string" && answer.trim()) {
             const citations: Array<{title:string;url:string}> = [];
-            const citationPattern = /(?:\\[(\\d+)\\])?\\s*(https?:\\/\\/[^\\s)\\]]+)/g;
-            let match: RegExpExecArray | null;
-            while ((match = citationPattern.exec(answer)) !== null) {
-              const url = match[2] || match[1];
-              if (url && !citations.some((x) => x.url === url)) citations.push({ title: url, url });
+            const urls = answer.match(/https?:\/\/[^\s)]+/g) || [];
+            for (const url of urls) {
+              const cleanUrl = url.replace(/[.,;]+$/, "");
+              if (cleanUrl && !citations.some((x) => x.url === cleanUrl)) {
+                citations.push({ title: cleanUrl, url: cleanUrl });
+              }
             }
             const searched = useGroqSearch && (
               Array.isArray(message?.tool_calls) ||
