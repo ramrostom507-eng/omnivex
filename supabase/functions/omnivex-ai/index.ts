@@ -39,7 +39,8 @@ function collectInteraction(interaction: any) {
     ? interaction.output_text.trim()
     : textParts.join("\n").trim();
   const unique = citations.filter((item, index, all) => all.findIndex((x) => x.url === item.url) === index);
-  return { answer, citations: unique };
+  const searchExecuted = steps.some((step) => step?.type === "google_search_call");
+  return { answer, citations: unique, searchExecuted };
 }
 
 async function callGeminiSearch(apiKey: string, model: string, system: string, prompt: string) {
@@ -163,7 +164,7 @@ Deno.serve(async (req: Request) => {
       const citations = result.citations;
       return json(200, {
         answer: result.answer, model: result.model, provider: "Gemini",
-        web_search_used: citations.length > 0,
+        web_search_used: result.searchExecuted,
         citations,
         notice: citations.length
           ? "تم استخدام بحث Google وإرفاق المراجع التي أعادتها الخدمة."
@@ -196,7 +197,9 @@ Deno.serve(async (req: Request) => {
               answer: answer.trim(), model: result?.model || "openai/gpt-oss-120b",
               provider: "Groq", web_search_used: false, citations: [],
               notice: searchRequested
-                ? "لم يُفعّل البحث الحي بعد؛ هذه إجابة نموذج ذكاء اصطناعي دون تحقق ويب آني."
+                ? (searchEnabled
+                  ? "تعذّر استخدام بحث Google لأن مفتاح Gemini غير مضبوط؛ هذه إجابة دون تحقق ويب آني."
+                  : "البحث الحي غير مفعّل؛ هذه إجابة دون تحقق ويب آني.")
                 : "هذه إجابة ذكاء اصطناعي دون بحث ويب حي.",
             });
           }
