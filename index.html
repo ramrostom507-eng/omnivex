@@ -326,7 +326,7 @@ function setupActions(){
    const sources=$("aiSources");
    sources.innerHTML=citations.map((item,i)=>{
     const url=String(item.url||"");
-    if(!/^https?:\\/\\//i.test(url))return "";
+    if(!/^https?:\/\//i.test(url))return "";
     return '<a class="source-link" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+(i+1)+'. '+esc(item.title||url)+'</a>';
    }).join("");
    msg("aiStatus",data?.web_search_used
