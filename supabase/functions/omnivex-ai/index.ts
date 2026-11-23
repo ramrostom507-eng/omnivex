@@ -161,15 +161,8 @@ Deno.serve(async (req: Request) => {
     if (searchRequested && searchEnabled && geminiKey) {
       const result = await callGeminiSearch(geminiKey, searchModel, system, prompt);
       const citations = result.citations;
-      let answer = result.answer;
-      const missing = citations.filter((item) => !answer.includes(item.url));
-      if (missing.length) {
-        answer += "\n\n### مصادر البحث\n" + missing.map((item) =>
-          "- [" + item.title.replace(/[\[\]]/g, "") + "](" + item.url + ")"
-        ).join("\n");
-      }
       return json(200, {
-        answer, model: result.model, provider: "Gemini",
+        answer: result.answer, model: result.model, provider: "Gemini",
         web_search_used: citations.length > 0,
         citations,
         notice: citations.length
