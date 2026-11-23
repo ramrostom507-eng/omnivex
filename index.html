@@ -156,6 +156,7 @@ const ADMIN_EMAIL="ramrostom@gmail.com";
 const $=id=>document.getElementById(id);
 const tables=["companies","market_research","pain_points","solutions","deals"];
 let sb=null,currentUser=null,isShowingApp=false,activityHeartbeat=null,activitySessionId=null;
+function isAdminUser(user){return user?.app_metadata?.role==="admin";}
 
 function msg(id,text){if($(id))$(id).textContent=text}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -185,13 +186,13 @@ function showAuth(message){
 function showApp(user){
  currentUser=user;isShowingApp=true;$("authView").classList.add("hidden");$("appView").classList.remove("hidden");
  $("userEmail").textContent=user?.email||"";
- const admin=(user?.email||"").toLowerCase()===ADMIN_EMAIL;
+ const admin=isAdminUser(user);
  $("adminNav").classList.toggle("hidden",!admin);
  if(!admin&&$("admin").classList.contains("active"))navigate("overview");
  loadAll();startActivityTracking();
 }
 function navigate(id){
- if(id==="admin"&&(currentUser?.email||"").toLowerCase()!==ADMIN_EMAIL){alert("هذه الصفحة مخصصة لمدير المنصة.");return}
+ if(id==="admin"&&!isAdminUser(currentUser)){alert("هذه الصفحة مخصصة لمدير المنصة.");return}
  document.querySelectorAll(".section").forEach(x=>x.classList.toggle("active",x.id===id));
  document.querySelectorAll("[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page===id));
  const titles={overview:"لوحة القيادة",companies:"الشركات",research:"أبحاث الأسواق",pains:"احتياجات الشركات",solutions:"الحلول المقترحة",deals:"الفرص والصفقات",assistant:"OMNIVEX AI",admin:"لوحة الإدارة"};
@@ -215,12 +216,12 @@ async function loadAll(){
  $("dealsRows").innerHTML=deals.map(x=>`<tr><td>${esc(x.title)}</td><td>${esc(x.amount)} ${esc(x.currency||"USD")}</td><td>${esc(x.stage)}</td><td>${date(x.expected_close)}</td></tr>`).join("")||empty(4);
  }catch(e){console.error(e);alert("تعذّر تحميل البيانات: "+(e.message||e))}
 }
-async function insertRow(table,payload){const {error}=await sb.from(table).insert(payload);if(error)throw error;await loadAll()}
+async function insertRow(table,payload){if(!currentUser?.id)throw new Error("يجب تسجيل الدخول قبل الحفظ.");const {error}=await sb.from(table).insert({...payload,user_id:currentUser.id});if(error)throw error;await loadAll()}
 function clearFields(ids){ids.forEach(id=>{if($(id))$(id).value=""})}
 
 /* إصلاح ربط لوحة الإدارة مع أسماء الحقول الفعلية التي ترجعها Edge Function */
 async function loadAdminDashboard(){
- if(!currentUser||(currentUser.email||"").toLowerCase()!==ADMIN_EMAIL)return;
+ if(!isAdminUser(currentUser))return;
  const ids=["adminUsers","adminActiveUsers","adminSessions","adminViews","adminEvents24","adminEventsTotal"];
  ids.forEach(id=>msg(id,"…"));
  try{
