@@ -207,35 +207,66 @@ Deno.serve(async (req: Request) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 50000);
       try {
+        // GPT-OSS on Groq supports the built-in browser_search tool. This lets
+        // OMNIVEX perform live research with the existing GROQ_API_KEY; no
+        // separate Gemini key is required.
+        const useGroqSearch = searchRequested;
+        const groqBody: Record<string, unknown> = {
+          model: "openai/gpt-oss-120b",
+          messages: [
+            { role: "system", content: system + (useGroqSearch
+              ? "\\nأجرِ بحث ويب فعلياً باستخدام أداة browser_search قبل الإجابة. استشهد بالمصادر وروابطها داخل الإجابة، واذكر تاريخ النشر أو الوصول عندما يظهر. لا تعتبر مقتطف البحث دليلاً كافياً إذا تعارض مع مصدر أولي."
+              : "") },
+            { role: "user", content: prompt },
+          ],
+          max_completion_tokens: 2400,
+          reasoning_effort: "low",
+          citation_options: "enabled",
+        };
+        if (useGroqSearch) {
+          groqBody.tools = [{ type: "browser_search" }];
+          groqBody.tool_choice = "required";
+        }
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: { "Authorization": "Bearer " + groqKey, "Content-Type": "application/json" },
           signal: controller.signal,
-          body: JSON.stringify({
-            model: "openai/gpt-oss-120b",
-            messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
-            max_completion_tokens: 1800,
-            reasoning_effort: "medium",
-          }),
+          body: JSON.stringify(groqBody),
         });
         const raw = await response.text();
         let result: any = {};
         try { result = JSON.parse(raw); } catch { /* provider returned non-JSON */ }
         if (response.ok) {
-          const answer = result?.choices?.[0]?.message?.content;
+          const message = result?.choices?.[0]?.message;
+          const answer = message?.content;
           if (typeof answer === "string" && answer.trim()) {
+            const citations: Array<{title:string;url:string}> = [];
+            const citationPattern = /(?:\\[(\\d+)\\])?\\s*(https?:\\/\\/[^\\s)\\]]+)/g;
+            let match: RegExpExecArray | null;
+            while ((match = citationPattern.exec(answer)) !== null) {
+              const url = match[2] || match[1];
+              if (url && !citations.some((x) => x.url === url)) citations.push({ title: url, url });
+            }
+            const searched = useGroqSearch && (
+              Array.isArray(message?.tool_calls) ||
+              citations.length > 0 ||
+              /\\[\\d+\\]/.test(answer)
+            );
             return json(200, {
               answer: answer.trim(), model: result?.model || "openai/gpt-oss-120b",
-              provider: "Groq", web_search_used: false, citations: [],
-              notice: searchRequested
-                ? (searchEnabled
-                  ? "تعذّر استخدام بحث Google لأن مفتاح Gemini غير مضبوط؛ هذه إجابة دون تحقق ويب آني."
-                  : "البحث الحي غير مفعّل؛ هذه إجابة دون تحقق ويب آني.")
-                : "هذه إجابة ذكاء اصطناعي دون بحث ويب حي.",
+              provider: "Groq", web_search_used: searched, citations,
+              notice: searched
+                ? "تم تشغيل البحث الحي عبر Groq Browser Search. راجع الروابط وتواريخ المصادر قبل اتخاذ القرار."
+                : (useGroqSearch
+                  ? "طُلب البحث الحي لكن لم يؤكد المزود تنفيذ أداة البحث؛ تعامل مع الإجابة كتحليل غير موثق."
+                  : "هذه إجابة ذكاء اصطناعي دون بحث ويب حي."),
             });
           }
         }
         console.error("Groq request failed", { status: response.status, message: String(result?.error?.message || "").slice(0, 300) });
+        if (useGroqSearch) {
+          return json(502, { error: "تعذّر تنفيذ البحث الحي عبر Groq: " + String(result?.error?.message || ("HTTP " + response.status)).slice(0, 240) + ". لم نعرض إجابة على أنها بحث موثق." });
+        }
       } finally {
         clearTimeout(timer);
       }
