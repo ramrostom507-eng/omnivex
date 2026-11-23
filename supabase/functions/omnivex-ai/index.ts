@@ -9,8 +9,9 @@ const corsHeaders = {
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
   status, headers: { ...corsHeaders, "Content-Type": "application/json" },
 });
-const SEARCH_MODEL_DEFAULT = "gemini-3.5-flash-lite";
-const STANDARD_MODEL_DEFAULT = "gemini-3.5-flash-lite";
+const SEARCH_MODEL_DEFAULT = "gemini-3.8-flash";
+const STANDARD_MODEL_DEFAULT = "gemini-3.8-flash";
+const GEMINI_FALLBACK_MODEL_DEFAULT = "gemini-3.5-flash";
 const MAX_PROMPT_LENGTH = 12000;
 
 function needsLiveSearch(prompt: string, mode: string): boolean {
@@ -113,6 +114,28 @@ async function callGeminiStandard(apiKey: string, model: string, system: string,
   }
 }
 
+function isTemporaryProviderError(error: unknown): boolean {
+  const status = (error as any)?.status;
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return [429, 500, 502, 503, 504].includes(status) ||
+    message.includes("high demand") || message.includes("overloaded") ||
+    message.includes("temporarily unavailable") || message.includes("try again later");
+}
+
+async function callGeminiStandardWithFallback(
+  apiKey: string, primaryModel: string, fallbackModel: string, system: string, prompt: string,
+) {
+  try {
+    return await callGeminiStandard(apiKey, primaryModel, system, prompt);
+  } catch (primaryError) {
+    if (!isTemporaryProviderError(primaryError) || fallbackModel === primaryModel) throw primaryError;
+    console.warn("Gemini primary model temporarily unavailable; trying fallback model", {
+      primaryModel, fallbackModel, status: (primaryError as any)?.status,
+    });
+    return await callGeminiStandard(apiKey, fallbackModel, system, prompt);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
@@ -161,16 +184,23 @@ Deno.serve(async (req: Request) => {
     // Search grounding is deliberately OFF unless an administrator explicitly enables it.
     // This prevents unexpected Google Search usage or charges during setup.
     if (searchRequested && searchEnabled && geminiKey) {
-      const result = await callGeminiSearch(geminiKey, searchModel, system, prompt);
-      const citations = result.citations;
-      return json(200, {
-        answer: result.answer, model: result.model, provider: "Gemini",
-        web_search_used: result.searchExecuted,
-        citations,
-        notice: citations.length
-          ? "تم استخدام بحث Google وإرفاق المراجع التي أعادتها الخدمة."
-          : "تم إرسال الطلب إلى أداة البحث، لكن لم تُرجع الخدمة مراجع قابلة للعرض.",
-      });
+      try {
+        const result = await callGeminiSearch(geminiKey, searchModel, system, prompt);
+        const citations = result.citations;
+        return json(200, {
+          answer: result.answer, model: result.model, provider: "Gemini",
+          web_search_used: result.searchExecuted,
+          citations,
+          notice: citations.length
+            ? "تم استخدام بحث Google وإرفاق المراجع التي أعادتها الخدمة."
+            : "تم إرسال الطلب إلى أداة البحث، لكن لم تُرجع الخدمة مراجع قابلة للعرض.",
+        });
+      } catch (searchError) {
+        if (!isTemporaryProviderError(searchError)) throw searchError;
+        console.warn("Gemini Search temporarily unavailable; continuing without live search", {
+          status: (searchError as any)?.status,
+        });
+      }
     }
 
     if (groqKey) {
@@ -212,19 +242,28 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!geminiKey) return json(502, { error: "تعذّر الوصول إلى مزود الذكاء الاصطناعي." });
-    const result = await callGeminiStandard(geminiKey, standardModel, system, prompt);
+    const fallbackModel = Deno.env.get("GEMINI_FALLBACK_MODEL") || GEMINI_FALLBACK_MODEL_DEFAULT;
+    const result = await callGeminiStandardWithFallback(
+      geminiKey, standardModel, fallbackModel, system, prompt,
+    );
     return json(200, {
       answer: result.answer, model: result.model, provider: "Gemini",
       web_search_used: false, citations: [],
       notice: searchRequested
-        ? "البحث الحي غير مفعّل حالياً؛ هذه إجابة دون تحقق ويب آني."
+        ? (searchEnabled
+          ? "تعذّر البحث الحي مؤقتاً؛ أُنجز التحليل دون مراجع ويب مباشرة."
+          : "البحث الحي غير مفعّل حالياً؛ هذه إجابة دون تحقق ويب آني.")
         : "لم يُستخدم البحث الحي في هذا الطلب.",
     });
   } catch (error) {
     const status = (error as any)?.status;
     if (status === 429) return json(429, {
-      error: "بلغ مزود الذكاء الاصطناعي حد الطلبات المتاح حالياً. انتظر ثم أعد المحاولة.",
+      error: "بلغ مزود الذكاء الاصطناعي حد الطلبات المتاح حالياً. انتظر دقيقة ثم أعد المحاولة.",
       code: "PROVIDER_RATE_LIMIT",
+    });
+    if ([500, 502, 503, 504].includes(status)) return json(503, {
+      error: "مزود الذكاء الاصطناعي مشغول مؤقتاً ولم ينجح النموذج الاحتياطي. أعد المحاولة بعد قليل.",
+      code: "PROVIDER_TEMPORARILY_UNAVAILABLE",
     });
     console.error("OMNIVEX AI request error", error instanceof Error ? error.message : "Unknown error");
     return json(error instanceof Error && error.name === "AbortError" ? 504 : 502, {
