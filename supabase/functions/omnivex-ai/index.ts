@@ -53,7 +53,8 @@ async function callGeminiSearch(apiKey: string, model: string, system: string, p
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        input: system + "\n\nطلب المستخدم:\n" + prompt,
+        system_instruction: system,
+        input: prompt,
         tools: [{ type: "google_search" }],
       }),
     });
