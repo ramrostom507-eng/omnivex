@@ -315,7 +315,7 @@ function setupActions(){
  });
  $("askAI").addEventListener("click",async()=>{
   const prompt=$("aiPrompt").value.trim();if(!prompt)return alert("اكتب طلب التحليل أولاً.");
-  $("askAI").disabled=true;msg("aiStatus","جارٍ الاتصال بمساعد OMNIVEX...");$("aiResult").textContent="";
+  $("askAI").disabled=true;msg("aiStatus","جارٍ الاتصال بمساعد OMNIVEX...");$("aiResult").textContent="";$("aiSources").innerHTML="";
   try{
    const {data,error}=await sb.functions.invoke("omnivex-ai",{body:{prompt,mode:$("aiMode").value}});
    if(error)throw error;if(data?.error)throw new Error(data.error);
