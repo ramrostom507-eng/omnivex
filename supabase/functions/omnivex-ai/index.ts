@@ -16,7 +16,7 @@ const MAX_PROMPT_LENGTH = 12000;
 
 function needsLiveSearch(prompt: string, mode: string): boolean {
   const p = (prompt + " " + mode).toLowerCase();
-  return /بحث|ابحث|مصادر|مراجع|آخر|أحدث|حديث|حالي|اليوم|هذا الأسبوع|هذا الشهر|سعر اليوم|أسعار|السوق الآن|بيانات التجارة|إحصائيات|استيراد|تصدير|موردين|موردون|مستوردين|منافسين|شركات في|فرص السوق|تحليل السوق|دراسة سوق|حجم السوق|market\\s*research|competitor\\s*analysis|opportunity\\s*scan|latest|current|today|this week|this month|recent|live|sources|citations|trade data|market size|competitor|competitors|import|export|hs code/.test(p);
+  return /بحث|ابحث|مصادر|مراجع|آخر|أحدث|حديث|حالي|اليوم|هذا الأسبوع|هذا الشهر|سعر اليوم|أسعار|السوق الآن|بيانات التجارة|إحصائيات|استيراد|تصدير|موردين|موردون|مستوردين|منافسين|شركات في|فرص السوق|تحليل السوق|دراسة سوق|حجم السوق|market\s*research|competitor\s*analysis|opportunity\s*scan|latest|current|today|this week|this month|recent|live|sources|citations|trade data|market size|competitor|competitors|import|export|hs code/.test(p);
 }
 
 function collectInteraction(interaction: any) {
@@ -174,7 +174,14 @@ Deno.serve(async (req: Request) => {
       "إذا لم تُجرَ عملية بحث ويب فعلية فلا تدّعِ أنك بحثت على الإنترنت أو أن المعلومات آنية. لا تضع روابط أو مراجع غير متحقق منها.\n" +
       "عند تقدير سوق أو إيراد أو تكلفة، اذكر المعادلة والافتراضات. لا تدّعِ أنك تواصلت مع شركة أو أرسلت رسالة أو أجريت معاملة.\n" +
       "في بيانات التجارة حدّد المنتج بدقة، واذكر رمز HS والفترة والوحدة والعملة عند توفرها. فضّل المصادر الأولية كالجمارك والوزارات والجهات الإحصائية والمنظمات الدولية. عند غياب البيانات اكتب «غير متاح أو لم أتمكن من التحقق» بدلاً من التخمين.\n" +
-      "قدّم خلاصة منظمة تتضمن الأدلة والافتراضات والتحليل والفرص والمخاطر والخطوات التالية عند ملاءمتها.";
+      "قدّم التقرير بعناوين واضحة بهذا الترتيب عند ملاءمته: الملخص التنفيذي؛ حقائق مثبتة مع مصدر لكل رقم؛ تقديرات وافتراضات مع معادلاتها؛ تحليل واستنتاجات؛ معلومات لم يتم التحقق منها؛ الفرص والمخاطر؛ الخطوات التالية. " +
+      "ضع بجانب كل ادعاء أحد التصنيفات: [حقيقة موثقة] أو [تقدير] أو [تحليل] أو [غير متحقق]. لا تضع اسم شركة أو هاتفاً أو بريداً أو سعراً أو حصة سوقية ضمن الحقائق الموثقة دون مصدر مباشر قابل للفتح. " +
+      "إذا تعذر الوصول إلى مصدر أولي، صرّح بذلك ولا تحول قوائم الدليل التجاري أو صفحات التواصل إلى إثبات لوجود مستورد فعلي أو نشاط استيراد.\\n" +
+      "عند تحليل الشركات، صنّف كل كيان بوضوح ضمن فئة واحدة: مصنع/منتج، مستورد مثبت، موزع مثبت، تاجر جملة، تاجر تجزئة، وسيط، أو مرشح محتمل غير متحقق منه. لا تصف الشركة بأنها مستورد أو موزع مثبت إلا بوجود دليل مباشر على هذا الدور.\\n" +
+      "لكل شركة اعرض الاسم القانوني أو التجاري، الدور المثبت، المنتج/القطاع، البلد، دليل الدور، رابط المصدر، تاريخ النشر أو التحقق، وبيانات الاتصال فقط إذا كانت منشورة مباشرة في مصدر موثوق. إذا لم يوجد دليل كافٍ فاكتب: مرشح محتمل — غير مثبت.\\n" +
+      "اكشف التكرار قبل عرض النتائج: قارن الاسم القانوني والاسم التجاري والنطاق الإلكتروني والهاتف والعنوان. أشر إلى السجلات المتشابهة وسبب الاشتباه، ولا تدمج كيانين لمجرد تشابه الاسم دون دليل يثبت أنهما الشركة نفسها.\\n" +
+      "امنح كل شركة أو فرصة درجة موثوقية من 0 إلى 100 مع شرح الحساب: قوة الدليل 0–40، جودة المصدر 0–25، حداثة المصدر 0–15، تطابق هوية الكيان 0–10، والتأييد المستقل من مصدر ثانٍ 0–10. لا تمنح نقاطاً بلا دليل. التصنيف: 80–100 مرتفعة، 60–79 متوسطة، 40–59 منخفضة، 0–39 ضعيفة؛ وإذا لم تتوفر أدلة كافية فاكتب غير قابل للتقييم.\\n" +
+      "لا تعتبر صفحة متجر أو فيسبوك أو دليل تجاري أو معرض أو صفحة تعريف عامة دليلاً على الاستيراد. إثبات الاستيراد يحتاج سجلاً جمركياً أو بيانات تجارة رسمية أو إفصاحاً موثقاً من الشركة أو وثيقة شحن/مناقصة موثوقة. الدليل غير المباشر يعني مرشحاً محتملاً لا مستورداً مثبتاً.";
 
     const searchRequested = needsLiveSearch(prompt, mode);
     const searchEnabled = Deno.env.get("OMNIVEX_GOOGLE_SEARCH_ENABLED") === "true";
@@ -221,7 +228,6 @@ Deno.serve(async (req: Request) => {
           ],
           max_completion_tokens: 2400,
           reasoning_effort: "low",
-          citation_options: "disabled",
         };
         if (useGroqSearch) {
           groqBody.tools = [{ type: "browser_search" }];
@@ -239,25 +245,38 @@ Deno.serve(async (req: Request) => {
         if (response.ok) {
           const message = result?.choices?.[0]?.message;
           const answer = message?.content;
-          if (typeof answer === "string" && answer.trim()) {
-            const citations: Array<{title:string;url:string}> = [];
-            const urls = answer.match(/https?:\/\/[^\s)]+/g) || [];
-            for (const url of urls) {
-              const cleanUrl = url.replace(/[.,;]+$/, "");
-              if (cleanUrl && !citations.some((x) => x.url === cleanUrl)) {
-                citations.push({ title: cleanUrl, url: cleanUrl });
-              }
+          // Preserve provider-supplied URL annotations when available.
+          const citations: Array<{title:string;url:string}> = [];
+          const addCitation = (title: unknown, url: unknown) => {
+            if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return;
+            const clean = url.replace(/[),.;]+$/, "");
+            if (!citations.some((item) => item.url === clean)) {
+              citations.push({ title: String(title || clean).slice(0, 180), url: clean });
             }
+          };
+          const annotationLists = [
+            message?.annotations, message?.citations, result?.citations,
+            message?.sources, result?.sources,
+          ];
+          for (const list of annotationLists) {
+            if (!Array.isArray(list)) continue;
+            for (const item of list) {
+              addCitation(item?.title || item?.name, item?.url || item?.uri || item?.source_url);
+            }
+          }
+          if (typeof answer === "string" && answer.trim()) {
+            const urls = answer.match(/https?:\/\/[^\s)]+/g) || [];
+            for (const url of urls) addCitation(url, url);
             // tool_choice="required" forces the built-in browser_search path.
             const searched = useGroqSearch;
             return json(200, {
               answer: answer.trim(), model: result?.model || "openai/gpt-oss-120b",
               provider: "Groq", web_search_used: searched, citations,
               notice: searched
-                ? "تم تشغيل البحث الحي عبر Groq Browser Search. راجع الروابط وتواريخ المصادر قبل اتخاذ القرار."
-                : (useGroqSearch
-                  ? "طُلب البحث الحي لكن لم يؤكد المزود تنفيذ أداة البحث؛ تعامل مع الإجابة كتحليل غير موثق."
-                  : "هذه إجابة ذكاء اصطناعي دون بحث ويب حي."),
+                ? (citations.length
+                  ? "تم تنفيذ البحث الحي عبر Groq Browser Search، وأُرفقت الروابط التي أعادها المزود."
+                  : "تم تنفيذ البحث الحي عبر Groq Browser Search. أظهر المزود إشارات المراجع داخل الإجابة لكنه لم يُرجع روابط منفصلة قابلة للاستخراج؛ لا تعتبر أي جهة اتصال أو رقم غير موثق.")
+                : "هذه إجابة ذكاء اصطناعي دون بحث ويب حي.",
             });
           }
         }
