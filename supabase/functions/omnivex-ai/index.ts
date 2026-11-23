@@ -10,7 +10,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
   status, headers: { ...corsHeaders, "Content-Type": "application/json" },
 });
 const SEARCH_MODEL_DEFAULT = "gemini-3.5-flash-lite";
-const STANDARD_MODEL_DEFAULT = "gemini-3.8-flash";
+const STANDARD_MODEL_DEFAULT = "gemini-3.5-flash-lite";
 const MAX_PROMPT_LENGTH = 12000;
 
 function needsLiveSearch(prompt: string, mode: string): boolean {
