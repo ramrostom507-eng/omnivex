@@ -221,7 +221,7 @@ Deno.serve(async (req: Request) => {
           ],
           max_completion_tokens: 2400,
           reasoning_effort: "low",
-          citation_options: "enabled",
+          citation_options: "disabled",
         };
         if (useGroqSearch) {
           groqBody.tools = [{ type: "browser_search" }];
