@@ -11,12 +11,12 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 });
 const SEARCH_MODEL_DEFAULT = "gemini-3.8-flash";
 const STANDARD_MODEL_DEFAULT = "gemini-3.8-flash";
-const GEMINI_FALLBACK_MODEL_DEFAULT = "gemini-3.5-flash";
+const GEMINI_FALLBACK_MODEL_DEFAULT = "gemini-3.5-flash-lite";
 const MAX_PROMPT_LENGTH = 12000;
 
 function needsLiveSearch(prompt: string, mode: string): boolean {
   const p = (prompt + " " + mode).toLowerCase();
-  return /بحث|ابحث|مصادر|مراجع|آخر|احدث|حديث|حالي|اليوم|هذا الأسبوع|هذا الشهر|سعر اليوم|أسعار|السوق الآن|بيانات التجارة|إحصائيات|market research|latest|current|today|this week|this month|recent|live|sources|citations|trade data|market size|competitor|competitors|import|export|hs code/.test(p);
+  return /بحث|ابحث|مصادر|مراجع|آخر|احدث|حديث|حالي|اليوم|هذا الأسبوع|هذا الشهر|سعر اليوم|أسعار|السوق الآن|بيانات التجارة|إحصائيات|market[_\\s]research|competitor[_\\s]analysis|opportunity[_\\s]scan|latest|current|today|this week|this month|recent|live|sources|citations|trade data|market size|competitor|competitors|import|export|hs code/.test(p);
 }
 
 function collectInteraction(interaction: any) {
