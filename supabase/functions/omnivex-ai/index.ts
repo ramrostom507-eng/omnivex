@@ -215,28 +215,27 @@ Deno.serve(async (req: Request) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 50000);
       try {
-        // GPT-OSS on Groq supports the built-in browser_search tool. This lets
-        // OMNIVEX perform live research with the existing GROQ_API_KEY; no
-        // separate Gemini key is required.
-        // Keep the administrator's master switch authoritative for BOTH providers.
+        // Groq's GPT-OSS Browser Search is supported through the Responses API.
+        // Do not send citation_options: that flag triggers the reported
+        // "model does not support citations" error for this model/tool path.
         const useGroqSearch = searchRequested && searchEnabled;
+        const groqInput = [
+          { role: "system", content: [{ type: "input_text", text: system + (useGroqSearch
+            ? "\nنفّذ بحث ويب فعلياً باستخدام browser_search قبل الإجابة. استشهد بالمصادر التي استرجعتها، ولا تخترع روابط أو بيانات. اذكر تاريخ النشر أو الوصول عندما يظهر."
+            : "") }] },
+          { role: "user", content: [{ type: "input_text", text: prompt }] },
+        ];
         const groqBody: Record<string, unknown> = {
           model: "openai/gpt-oss-120b",
-          citation_options: "enabled",
-          messages: [
-            { role: "system", content: system + (useGroqSearch
-              ? "\\nأجرِ بحث ويب فعلياً باستخدام أداة browser_search قبل الإجابة. استشهد بالمصادر وروابطها داخل الإجابة، واذكر تاريخ النشر أو الوصول عندما يظهر. لا تعتبر مقتطف البحث دليلاً كافياً إذا تعارض مع مصدر أولي."
-              : "") },
-            { role: "user", content: prompt },
-          ],
-          max_completion_tokens: 2400,
-          reasoning_effort: "low",
+          input: groqInput,
+          max_output_tokens: 2400,
+          reasoning: { effort: "low" },
         };
         if (useGroqSearch) {
           groqBody.tools = [{ type: "browser_search" }];
           groqBody.tool_choice = "required";
         }
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        const response = await fetch("https://api.groq.com/openai/v1/responses", {
           method: "POST",
           headers: { "Authorization": "Bearer " + groqKey, "Content-Type": "application/json" },
           signal: controller.signal,
@@ -246,9 +245,7 @@ Deno.serve(async (req: Request) => {
         let result: any = {};
         try { result = JSON.parse(raw); } catch { /* provider returned non-JSON */ }
         if (response.ok) {
-          const message = result?.choices?.[0]?.message;
-          const answer = message?.content;
-          // Preserve provider-supplied URL annotations when available.
+          const answer = typeof result?.output_text === "string" ? result.output_text.trim() : "";
           const citations: Array<{title:string;url:string}> = [];
           const addCitation = (title: unknown, url: unknown) => {
             if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return;
@@ -257,35 +254,37 @@ Deno.serve(async (req: Request) => {
               citations.push({ title: String(title || clean).slice(0, 180), url: clean });
             }
           };
-          const annotationLists = [
-            message?.annotations, message?.citations, result?.citations,
-            message?.sources, result?.sources,
-          ];
-          for (const list of annotationLists) {
-            if (!Array.isArray(list)) continue;
-            for (const item of list) {
-              addCitation(item?.title || item?.name, item?.url || item?.uri || item?.source_url);
+          // Responses API returns URL citations as annotations on message content.
+          for (const item of Array.isArray(result?.output) ? result.output : []) {
+            if (item?.type !== "message" || !Array.isArray(item.content)) continue;
+            for (const block of item.content) {
+              for (const annotation of Array.isArray(block?.annotations) ? block.annotations : []) {
+                const detail = annotation?.url_citation || annotation;
+                addCitation(detail?.title || detail?.url, detail?.url);
+              }
             }
           }
-          if (typeof answer === "string" && answer.trim()) {
+          for (const item of Array.isArray(result?.citations) ? result.citations : []) {
+            addCitation(item?.title || item?.name, item?.url || item?.uri);
+          }
+          if (answer) {
             const urls = answer.match(/https?:\/\/[^\s)]+/g) || [];
             for (const url of urls) addCitation(url, url);
-            // tool_choice="required" forces the built-in browser_search path.
-            const searched = useGroqSearch;
             return json(200, {
-              answer: answer.trim(), model: result?.model || "openai/gpt-oss-120b",
-              provider: "Groq", web_search_used: searched, citations,
-              notice: searched
+              answer, model: result?.model || "openai/gpt-oss-120b",
+              provider: "Groq", web_search_used: useGroqSearch, citations,
+              notice: useGroqSearch
                 ? (citations.length
-                  ? "تم تنفيذ البحث الحي عبر Groq Browser Search، وأُرفقت الروابط التي أعادها المزود."
-                  : "تم تنفيذ البحث الحي عبر Groq Browser Search. أظهر المزود إشارات المراجع داخل الإجابة لكنه لم يُرجع روابط منفصلة قابلة للاستخراج؛ لا تعتبر أي جهة اتصال أو رقم غير موثق.")
+                  ? "تم تنفيذ البحث الحي عبر Groq Browser Search وإرفاق المصادر التي أعادتها الخدمة."
+                  : "تم تنفيذ البحث الحي، لكن لم تُرجع الخدمة روابط مصادر منفصلة قابلة للاستخراج. راجع إحالات المصادر داخل الإجابة ولا تعتمد على بيانات اتصال غير مثبتة.")
                 : "هذه إجابة ذكاء اصطناعي دون بحث ويب حي.",
             });
           }
         }
-        console.error("Groq request failed", { status: response.status, message: String(result?.error?.message || "").slice(0, 300) });
+        const providerMessage = String(result?.error?.message || result?.message || ("HTTP " + response.status)).slice(0, 300);
+        console.error("Groq Responses API request failed", { status: response.status, message: providerMessage });
         if (useGroqSearch) {
-          return json(502, { error: "تعذّر تنفيذ البحث الحي عبر Groq: " + String(result?.error?.message || ("HTTP " + response.status)).slice(0, 240) + ". لم نعرض إجابة على أنها بحث موثق." });
+          return json(502, { error: "تعذّر تنفيذ البحث الحي عبر Groq Browser Search: " + providerMessage + ". لم نعرض إجابة على أنها بحث موثق." });
         }
       } finally {
         clearTimeout(timer);
