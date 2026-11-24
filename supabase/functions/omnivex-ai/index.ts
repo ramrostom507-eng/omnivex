@@ -203,9 +203,11 @@ Deno.serve(async (req: Request) => {
             : "تم إرسال الطلب إلى أداة البحث، لكن لم تُرجع الخدمة مراجع قابلة للعرض.",
         });
       } catch (searchError) {
-        if (!isTemporaryProviderError(searchError)) throw searchError;
-        console.warn("Gemini Search temporarily unavailable; continuing without live search", {
+        // A Search API/model/configuration error must not prevent trying the
+        // configured Groq provider or the non-search Gemini fallback.
+        console.warn("Gemini Search failed; trying the next configured provider", {
           status: (searchError as any)?.status,
+          message: searchError instanceof Error ? searchError.message.slice(0, 180) : "Unknown error",
         });
       }
     }
@@ -217,7 +219,8 @@ Deno.serve(async (req: Request) => {
         // GPT-OSS on Groq supports the built-in browser_search tool. This lets
         // OMNIVEX perform live research with the existing GROQ_API_KEY; no
         // separate Gemini key is required.
-        const useGroqSearch = searchRequested;
+        // Keep the administrator's master switch authoritative for BOTH providers.
+        const useGroqSearch = searchRequested && searchEnabled;
         const groqBody: Record<string, unknown> = {
           model: "openai/gpt-oss-120b",
           messages: [
@@ -299,7 +302,7 @@ Deno.serve(async (req: Request) => {
       web_search_used: false, citations: [],
       notice: searchRequested
         ? (searchEnabled
-          ? "تعذّر البحث الحي مؤقتاً؛ أُنجز التحليل دون مراجع ويب مباشرة."
+          ? "تعذّر البحث الحي عبر المزودات المتاحة؛ أُنجز التحليل دون مراجع ويب مباشرة."
           : "البحث الحي غير مفعّل حالياً؛ هذه إجابة دون تحقق ويب آني.")
         : "لم يُستخدم البحث الحي في هذا الطلب.",
     });
