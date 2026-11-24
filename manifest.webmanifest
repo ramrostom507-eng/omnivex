@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "OMNIVEX Intelligence",
+  "short_name": "OMNIVEX",
+  "description": "منصة ذكاء الأعمال العالمية وأبحاث الأسواق واكتشاف فرص النمو.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "background_color": "#07111f",
+  "theme_color": "#07111f",
+  "icons": [
+    {
+      "src": "./icons/omnivex-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

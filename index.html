@@ -2,9 +2,17 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OMNIVEX | أومنيفكس</title>
-<meta name="description" content="منصة ذكاء الأعمال العالمية وأبحاث الأسواق واكتشاف فرص النمو.">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07111f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="OMNIVEX">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/omnivex-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/omnivex-icon.svg">
+<title>OMNIVEX Intelligence | أومنيفكس</title>
+<meta name="description" content="OMNIVEX Intelligence — منصة ذكاء الأعمال العالمية وأبحاث الأسواق واكتشاف فرص النمو.">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{--bg:#07111f;--panel:#101f32;--panel2:#142941;--gold:#d9b66d;--text:#eef3fa;--muted:#9aabc0;--line:#263b52;--green:#5dd6a0}
@@ -350,6 +358,11 @@ async function initialize(){
  }catch(e){console.error(e);showAuth("تعذّر تهيئة الاتصال: "+e.message)}
 }
 initialize();
+</script>
+<script>
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch((error) => console.warn("OMNIVEX offline setup:", error)));
+}
 </script>
 </body>
 </html>
