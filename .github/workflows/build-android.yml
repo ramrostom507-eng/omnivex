@@ -1,0 +1,79 @@
+name: Build OMNIVEX Intelligence Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "index.html"
+      - "manifest.webmanifest"
+      - "sw.js"
+      - "icons/**"
+      - "capacitor.config.json"
+      - ".github/workflows/build-android.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Prepare web app
+        run: |
+          mkdir -p www/icons
+          cp index.html www/index.html
+          cp manifest.webmanifest sw.js www/
+          cp icons/omnivex-icon.svg www/icons/
+
+      - name: Install Capacitor and generate Android project
+        run: |
+          npm init -y
+          npm install --save-exact @capacitor/core@7 @capacitor/android@7
+          npm install --save-dev --save-exact @capacitor/cli@7
+          npx cap add android
+          npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+          cd ..
+          cp android/app/build/outputs/apk/debug/app-debug.apk OMNIVEX-Intelligence.apk
+
+      - name: Upload APK build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OMNIVEX-Intelligence-Android
+          path: OMNIVEX-Intelligence.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish or update public APK download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view android-latest >/dev/null 2>&1; then
+            gh release create android-latest OMNIVEX-Intelligence.apk \
+              --title "OMNIVEX Intelligence for Android" \
+              --notes "Android install package. Build: ${{ github.run_number }}."
+          else
+            gh release upload android-latest OMNIVEX-Intelligence.apk --clobber
+          fi
