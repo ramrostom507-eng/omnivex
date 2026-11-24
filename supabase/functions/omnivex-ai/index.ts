@@ -211,6 +211,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    let groqSearchFailed = false;
     if (groqKey) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 50000);
@@ -284,14 +285,21 @@ Deno.serve(async (req: Request) => {
         const providerMessage = String(result?.error?.message || result?.message || ("HTTP " + response.status)).slice(0, 300);
         console.error("Groq Responses API request failed", { status: response.status, message: providerMessage });
         if (useGroqSearch) {
-          return json(502, { error: "تعذّر تنفيذ البحث الحي عبر Groq Browser Search: " + providerMessage + ". لم نعرض إجابة على أنها بحث موثق." });
+          // لا نُنهِ الطلب هنا: جرّب Gemini كمسار احتياطي، مع التصريح بأن
+          // الإجابة الاحتياطية ليست بحثاً حياً ولا تحمل مراجع ويب مباشرة.
+          groqSearchFailed = true;
         }
       } finally {
         clearTimeout(timer);
       }
     }
 
-    if (!geminiKey) return json(502, { error: "تعذّر الوصول إلى مزود الذكاء الاصطناعي." });
+    if (!geminiKey) return json(groqSearchFailed ? 503 : 502, {
+      error: groqSearchFailed
+        ? "تعذّر البحث الحي حالياً، ولا يوجد مزود احتياطي مفعّل. لم يتم إنشاء تقرير أو عرض معلومات غير موثقة."
+        : "تعذّر الوصول إلى مزود الذكاء الاصطناعي.",
+      code: groqSearchFailed ? "LIVE_SEARCH_UNAVAILABLE" : "AI_PROVIDER_UNAVAILABLE",
+    });
     const fallbackModel = Deno.env.get("GEMINI_FALLBACK_MODEL") || GEMINI_FALLBACK_MODEL_DEFAULT;
     const result = await callGeminiStandardWithFallback(
       geminiKey, standardModel, fallbackModel, system, prompt,
