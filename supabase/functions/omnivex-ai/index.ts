@@ -184,12 +184,11 @@ Deno.serve(async (req: Request) => {
       "لا تعتبر صفحة متجر أو فيسبوك أو دليل تجاري أو معرض أو صفحة تعريف عامة دليلاً على الاستيراد. إثبات الاستيراد يحتاج سجلاً جمركياً أو بيانات تجارة رسمية أو إفصاحاً موثقاً من الشركة أو وثيقة شحن/مناقصة موثوقة. الدليل غير المباشر يعني مرشحاً محتملاً لا مستورداً مثبتاً.";
 
     const searchRequested = needsLiveSearch(prompt, mode);
-    const searchEnabled = Deno.env.get("OMNIVEX_GOOGLE_SEARCH_ENABLED") === "true";
+    const searchEnabled = Deno.env.get("OMNIVEX_GOOGLE_SEARCH_ENABLED") !== "false";
     const searchModel = Deno.env.get("GEMINI_SEARCH_MODEL") || SEARCH_MODEL_DEFAULT;
     const standardModel = Deno.env.get("GEMINI_MODEL") || STANDARD_MODEL_DEFAULT;
 
-    // Search grounding is deliberately OFF unless an administrator explicitly enables it.
-    // This prevents unexpected Google Search usage or charges during setup.
+    // Live search is ON by default. Set OMNIVEX_GOOGLE_SEARCH_ENABLED=false only to disable it.
     if (searchRequested && searchEnabled && geminiKey) {
       try {
         const result = await callGeminiSearch(geminiKey, searchModel, system, prompt);
@@ -223,6 +222,7 @@ Deno.serve(async (req: Request) => {
         const useGroqSearch = searchRequested && searchEnabled;
         const groqBody: Record<string, unknown> = {
           model: "openai/gpt-oss-120b",
+          citation_options: "enabled",
           messages: [
             { role: "system", content: system + (useGroqSearch
               ? "\\nأجرِ بحث ويب فعلياً باستخدام أداة browser_search قبل الإجابة. استشهد بالمصادر وروابطها داخل الإجابة، واذكر تاريخ النشر أو الوصول عندما يظهر. لا تعتبر مقتطف البحث دليلاً كافياً إذا تعارض مع مصدر أولي."
