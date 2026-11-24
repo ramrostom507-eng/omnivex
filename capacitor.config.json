@@ -1,0 +1,13 @@
+{
+  "appId": "com.omnivex.intelligence",
+  "appName": "OMNIVEX Intelligence",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0
+    }
+  }
+}
