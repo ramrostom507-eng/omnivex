@@ -45,7 +45,11 @@ jobs:
           npm init -y
           npm install --save-exact @capacitor/core@7 @capacitor/android@7
           npm install --save-dev --save-exact @capacitor/cli@7
+          npm install --no-save sharp @capacitor/assets
+          mkdir -p assets
+          node --input-type=module -e "import sharp from 'sharp'; await sharp('icons/omnivex-icon.svg').resize(1024,1024).png().toFile('assets/icon-only.png'); await sharp('icons/omnivex-icon.svg').resize(2732,2732,{fit:'contain',background:'#ffffff'}).png().toFile('assets/splash.png')"
           npx cap add android
+          npx capacitor-assets generate --android --assetPath assets
           npx cap sync android
 
       - name: Build debug APK
