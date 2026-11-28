@@ -325,7 +325,38 @@ function setupActions(){
   const prompt=$("aiPrompt").value.trim();if(!prompt)return alert("اكتب طلب التحليل أولاً.");
   $("askAI").disabled=true;msg("aiStatus","جارٍ الاتصال بمساعد OMNIVEX...");$("aiResult").textContent="";$("aiSources").innerHTML="";
   try{
-   const {data,error}=await sb.functions.invoke("omnivex-ai",{body:{prompt,mode:$("aiMode").value}});
+   const requestBody={prompt,mode:$("aiMode").value};
+   const {data:sessionData,error:sessionError}=await sb.auth.getSession();
+   if(sessionError)throw sessionError;
+   const accessToken=sessionData?.session?.access_token;
+   if(!accessToken)throw new Error("انتهت جلسة الدخول. سجّل الدخول مجدداً.");
+   let data=null,error=null,gatewayUnavailable=false;
+   try{
+    const gatewayResponse=await fetch("https://octopus-ai-core.syria-realestate-platform.workers.dev/v1/integrations/omnivex/execute",{
+     method:"POST",
+     headers:{Authorization:"Bearer "+accessToken,"Content-Type":"application/json"},
+     body:JSON.stringify(requestBody),
+     cache:"no-store",
+     redirect:"error"
+    });
+    if([404,500,502,503,504].includes(gatewayResponse.status)){
+     gatewayUnavailable=true;
+    }else{
+     data=await gatewayResponse.json().catch(()=>({error:"استجابة غير صالحة من بوابة OCTOPUS"}));
+     if(!gatewayResponse.ok)throw new Error(data?.error||("HTTP "+gatewayResponse.status));
+    }
+   }catch(gatewayError){
+    if(gatewayError instanceof TypeError || gatewayError?.name==="AbortError"){
+     gatewayUnavailable=true;
+    }else{
+     throw gatewayError;
+    }
+   }
+   if(gatewayUnavailable){
+    console.warn("OCTOPUS gateway unavailable; using the direct OMNIVEX Edge Function fallback.");
+    const direct=await sb.functions.invoke("omnivex-ai",{body:requestBody});
+    data=direct.data;error=direct.error;
+   }
    if(error)throw error;if(data?.error)throw new Error(data.error);
    const answer=data?.answer||"لم تصل إجابة من المساعد.";
    const citations=Array.isArray(data?.citations)?data.citations:[];
